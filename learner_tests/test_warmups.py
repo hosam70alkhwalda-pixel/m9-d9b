@@ -1,23 +1,14 @@
 """Learner-written tests for queries/warmups.py.
 
-You write at least 2 tests here. The autograder verifies each test
-function contains at least one assertion and is not left as the
-placeholder `pytest.fail("Not implemented")`.
+Tests run against the same Neo4j instance as the autograder, with the
+drill fixtures already loaded via conftest.py's `driver` fixture.
 
-A driver fixture (`driver`) is provided via conftest.py — it points at
-the same Neo4j instance the autograder uses, with the drill fixtures
-already loaded. Run a Cypher string in a session like:
-
-    with driver.session() as session:
-        rows = list(session.run(cypher_str, params))
-
-Test ideas:
-  - Confirm `q1_list_recipes()` returns exactly the 5 recipe names you
-    expect from `recipes_mini.cypher`.
-  - Confirm `q2_filter_by_cuisine("Italian")` returns the two Italian
-    recipes only — no Chinese or Sichuan recipes.
-  - Confirm `q3_subclass_traversal("Chinese")` includes Sichuan recipes
-    (via :SUBCLASS_OF) but `q2_filter_by_cuisine("Chinese")` does not.
+Fixture facts sourced from data/recipes_mini.cypher:
+  - 5 recipes total
+  - 2 Italian recipes:  "Spaghetti Carbonara", "Margherita Pizza"
+  - 1 direct-Chinese recipe: "Kung Pao Chicken"
+  - 1 Sichuan recipe (Sichuan -[:SUBCLASS_OF]-> Chinese): "Mapo Tofu"
+  - 1 Japanese recipe: "Sushi Platter"
 """
 
 import pytest
@@ -26,10 +17,38 @@ from queries.warmups import q1_list_recipes, q2_filter_by_cuisine, q3_subclass_t
 
 
 def test_q1_list_recipes_returns_all_five(driver):
-    """Replace this body with your own assertion(s)."""
-    pytest.fail("Not implemented — write your test here")
+    """q1_list_recipes() must return exactly 5 recipe names, one per node."""
+    cypher = q1_list_recipes()
+    with driver.session() as session:
+        rows = [record["name"] for record in session.run(cypher)]
+
+    assert len(rows) == 5, f"Expected 5 recipes, got {len(rows)}: {rows}"
+    # Spot-check two known recipes from the fixture
+    assert "Spaghetti Carbonara" in rows
+    assert "Sushi Platter" in rows
 
 
 def test_q3_traversal_picks_up_subclasses(driver):
-    """Replace this body with your own assertion(s)."""
-    pytest.fail("Not implemented — write your test here")
+    """q3_subclass_traversal('Chinese') must return both direct-Chinese and
+    Sichuan recipes, while q2_filter_by_cuisine('Chinese') must return only
+    the direct-Chinese ones — proving *0.. is doing hierarchy traversal.
+    """
+    cypher_q2, params_q2 = q2_filter_by_cuisine("Chinese")
+    cypher_q3, params_q3 = q3_subclass_traversal("Chinese")
+
+    with driver.session() as session:
+        direct_names = {r["name"] for r in session.run(cypher_q2, params_q2)}
+        traversal_names = {r["name"] for r in session.run(cypher_q3, params_q3)}
+
+    # Sichuan is a sub-cuisine of Chinese; traversal must include it
+    assert "Mapo Tofu" in traversal_names, (
+        "q3 should include Sichuan recipe 'Mapo Tofu' via :SUBCLASS_OF"
+    )
+    # Direct filter must NOT include the Sichuan recipe
+    assert "Mapo Tofu" not in direct_names, (
+        "q2 should NOT include Sichuan recipe 'Mapo Tofu' — no hierarchy"
+    )
+    # Traversal is a strict superset of (or equal to) the direct filter
+    assert direct_names.issubset(traversal_names), (
+        "Every direct-Chinese recipe should also appear in the traversal result"
+    )
